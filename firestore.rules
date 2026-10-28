@@ -1,0 +1,138 @@
+rules_version = '2';
+// Netlify Functions use the Admin SDK. Browser clients cannot assign roles or write orders.
+// approved is an automatically assigned enabled-store flag, not a manual approval workflow.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn(){
+      return request.auth != null;
+    }
+    function owner(uid){
+      return signedIn() && request.auth.uid == uid;
+    }
+    function seller(){
+      return signedIn() && request.auth.token.email_verified == true && request.auth.token.get('role','') == 'seller' && request.auth.token.get('sellerVerified',false) == true && get(/databases/$(database)/documents/sellerProfiles/$(request.auth.uid)).data.approved == true && get(/databases/$(database)/documents/sellerProfiles/$(request.auth.uid)).data.get('suspended', false) != true;
+    }
+    function text(value,max){
+      return value is string && value.size() <= max;
+    }
+    function preferences(p){
+      return p is map && p.keys().hasAll(['newsletter','orderUpdates']) && p.keys().hasOnly(['newsletter','orderUpdates']) && p.newsletter is bool && p.orderUpdates is bool;
+    }
+    function address(d){
+      return d is map && d.size()==8 && d.id.matches('(?s).{0,100}') && d.fullName.matches('(?s).{0,80}') && d.phone.matches('(?s).{0,25}') && d.address.matches('(?s).{0,200}') && d.city.matches('(?s).{0,80}') && d.state.matches('(?s).{0,80}') && d.postalCode.matches('(?s).{0,80}') && d.country.matches('(?s).{0,80}');
+    }
+    function addresses(a){
+      let n=a.size();
+      return a is list && n<=10 && (n<1||address(a[0])) && (n<2||address(a[1])) && (n<3||address(a[2])) && (n<4||address(a[3])) && (n<5||address(a[4])) && (n<6||address(a[5])) && (n<7||address(a[6])) && (n<8||address(a[7])) && (n<9||address(a[8])) && (n<10||address(a[9]));
+    }
+    function profile(d){
+      return d.keys().hasAll(['uid','displayName','email','avatar','phone','profileComplete','preferences','addresses','createdAt','updatedAt']) && d.keys().hasOnly(['uid','displayName','email','avatar','phone','profileComplete','preferences','addresses','createdAt','updatedAt']) && text(d.displayName,80) && text(d.email,120) && text(d.avatar,2048) && text(d.phone,25) && d.profileComplete is bool && preferences(d.preferences) && addresses(d.addresses);
+    }
+    match /users/{uid}
+    {
+      allow read: if owner(uid);
+      allow create: if request.method=='create' && owner(uid) && request.resource.data.uid==uid && request.resource.data.email==request.auth.token.email && request.resource.data.createdAt==request.time && request.resource.data.updatedAt==request.time && profile(request.resource.data);
+      allow update: if request.method=='update' && owner(uid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName','avatar','phone','profileComplete','preferences','addresses','updatedAt']) && request.resource.data.updatedAt==request.time && profile(request.resource.data);
+      allow delete: if false;
+    }
+    function image(d){
+      return d is map && d.keys().hasOnly(['id','url','name','publicId']) && (!d.keys().hasAny(['publicId']) || text(d.publicId,240)) && d.id.matches('(?s).{0,100}') && d.name.matches('(?s).{0,200}') && d.url.matches('https?://.*') && d.url.size()<=2048;
+    }
+    function images(a){
+      let n=a.size();
+      return a is list && n>=1 && n<=6 && image(a[0]) && (n<2||image(a[1])) && (n<3||image(a[2])) && (n<4||image(a[3])) && (n<5||image(a[4])) && (n<6||image(a[5]));
+    }
+    function specification(d){
+      return d is map && d.size()==2 && d.key.matches('(?s).{0,80}') && d.value.matches('(?s).{0,200}');
+    }
+    function specifications(a){
+      let n=a.size();
+      return a is list && n<=10 && (n<1||specification(a[0])) && (n<2||specification(a[1])) && (n<3||specification(a[2])) && (n<4||specification(a[3])) && (n<5||specification(a[4])) && (n<6||specification(a[5])) && (n<7||specification(a[6])) && (n<8||specification(a[7])) && (n<9||specification(a[8])) && (n<10||specification(a[9]));
+    }
+    function listing(d){
+      return d.keys().hasAll(['ownerId','source','externalId','title','description','category','price','discountPrice','sku','stock','images','status','specifications','rating','reviews','createdAt','updatedAt']) && d.keys().hasOnly(['ownerId','source','externalId','title','description','category','price','discountPrice','sku','stock','images','status','specifications','rating','reviews','createdAt','updatedAt']) && text(d.title,150) && d.title.size()>0 && text(d.description,5000) && d.description.size()>0 && text(d.category,80) && d.category.size()>0 && text(d.sku,60) && d.sku.size()>0 && d.price is number && d.price>0 && d.price<=1000000 && (d.discountPrice==null || (d.discountPrice is number && d.discountPrice>0 && d.discountPrice<d.price)) && d.stock is int && d.stock>=0 && d.stock<=1000000 && d.status in ['published','draft','archived'] && images(d.images) && specifications(d.specifications);
+    }
+    match /products/{id}
+    {
+      allow read: if resource.data.status=='published' || (seller() && resource.data.ownerId==request.auth.uid);
+      // Product and stock changes are validated by trusted Netlify operations.
+      allow create,update: if false;
+      allow delete: if false;
+      // Archive listings;
+      // Preserve historical references.
+    }
+    function source(p){
+      return (p.source.kind=='fakestore' && p.source.keys().hasOnly(['kind','externalId']) && text(p.source.externalId,80) && p.id=='fakestore:'+p.source.externalId) || (p.source.kind=='firestore' && p.source.keys().hasOnly(['kind','listingId','sellerId']) && text(p.source.listingId,100) && text(p.source.sellerId,128) && p.id=='firestore:'+p.source.listingId);
+    }
+    function productSnapshot(p){
+      return p is map && p.keys().hasAll(['id','source','name','description','category','price','rating','reviews','image']) && p.keys().hasOnly(['id','source','name','description','category','price','originalPrice','rating','reviews','image','badge','stock']) && text(p.id,160) && p.id.matches('(fakestore:[0-9]+|firestore:[a-zA-Z0-9_-]+)') && text(p.name,200) && text(p.description,6000) && text(p.category,80) && text(p.image,2048) && p.source is map && source(p) && (!p.keys().hasAny(['originalPrice']) || (p.originalPrice is number && p.originalPrice>=p.price && p.originalPrice<=1000000)) && (!p.keys().hasAny(['stock']) || (p.stock is int && p.stock>=0 && p.stock<=1000000)) && (!p.keys().hasAny(['badge']) || text(p.badge,40)) && p.price is number && p.price>=0 && p.price<=1000000 && p.rating is number && p.rating>=0 && p.rating<=5 && p.reviews is int && p.reviews>=0;
+    }
+    match /carts/{uid}
+    {
+      allow read: if owner(uid);
+      allow create,update: if owner(uid) && request.resource.data.keys().hasOnly(['ownerId','updatedAt']) && request.resource.data.ownerId==uid && request.resource.data.updatedAt==request.time;
+      allow delete: if owner(uid);
+      match /items/{id}
+      {
+        allow read,delete: if owner(uid);
+        allow create,update: if owner(uid) && request.resource.data.keys().hasOnly(['product','quantity','updatedAt']) && productSnapshot(request.resource.data.product) && request.resource.data.product.id==id && request.resource.data.quantity is int && request.resource.data.quantity>=1 && request.resource.data.quantity<=99 && request.resource.data.updatedAt==request.time;
+      }
+      match /merges/{id}
+      {
+        allow read: if owner(uid);
+        allow create: if owner(uid) && text(id,100) && request.resource.data.keys().hasOnly(['createdAt']) && request.resource.data.createdAt==request.time;
+        allow update,delete: if false;
+      }
+    }
+    match /wishlists/{uid}
+    {
+      allow read,delete: if owner(uid);
+      allow create,update: if owner(uid) && request.resource.data.keys().hasOnly(['ownerId','updatedAt']) && request.resource.data.ownerId==uid && request.resource.data.updatedAt==request.time;
+      match /items/{id}
+      {
+        allow read,delete: if owner(uid);
+        allow create,update: if owner(uid) && request.resource.data.keys().hasOnly(['product','updatedAt']) && productSnapshot(request.resource.data.product) && request.resource.data.product.id==id && request.resource.data.updatedAt==request.time;
+      }
+    }
+    function store(d){
+      return d.keys().hasAll(['ownerId','approved','requestedAt','updatedAt','name','description','email','phone','address','logo','notifications']) && d.keys().hasOnly(['ownerId','approved','requestedAt','updatedAt','name','description','email','phone','address','logo','notifications']) && text(d.name,80) && text(d.description,1000) && text(d.email,120) && text(d.phone,25) && text(d.address,500) && d.logo is list && d.logo.size()<=1 && (d.logo.size()==0||image(d.logo[0])) && d.notifications is map && d.notifications.keys().hasOnly(['orders','lowStock','weeklyReport']) && d.notifications.orders is bool && d.notifications.lowStock is bool && d.notifications.weeklyReport is bool;
+    }
+    match /sellerProfiles/{uid}
+    {
+      allow read: if owner(uid);
+      allow create: if false;
+      // enrollSeller creates the store through trusted Netlify code.
+      allow update: if owner(uid) && seller() && store(request.resource.data) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name','description','email','phone','address','logo','notifications','updatedAt']) && request.resource.data.updatedAt==request.time;
+      allow delete: if false;
+    }
+    match /orders/{id}
+    {
+      allow read: if signedIn() && resource.data.customerId==request.auth.uid;
+      allow write: if false;
+    }
+    match /orderItems/{id}
+    {
+      allow read: if signedIn() && (resource.data.customerId==request.auth.uid || (seller() && resource.data.sellerId==request.auth.uid));
+      allow write: if false;
+    }
+    match /sellerFulfillments/{id}
+    {
+      allow read: if seller() && resource.data.sellerId==request.auth.uid;
+      allow write: if false;
+    }
+    function review(d){
+      return d.keys().hasOnly(['customerId','productId','orderId','rating','body','status','createdAt','updatedAt']) && text(d.productId,160) && text(d.orderId,200) && text(d.body,2000) && d.rating is int && d.rating>=1 && d.rating<=5 && d.status=='pending';
+    }
+    match /reviews/{id}
+    {
+      allow read: if resource.data.status=='published' || (signedIn() && resource.data.customerId==request.auth.uid);
+      allow create: if signedIn() && request.auth.token.email_verified==true && review(request.resource.data) && request.resource.data.customerId==request.auth.uid && id==request.auth.uid+'_'+request.resource.data.productId && request.resource.data.createdAt==request.time && request.resource.data.updatedAt==request.time && get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.customerId==request.auth.uid && get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.status=='Delivered' && get(/databases/$(database)/documents/orderItems/$(request.resource.data.orderId+'_'+request.resource.data.productId)).data.customerId==request.auth.uid;
+      allow update: if signedIn() && resource.data.customerId==request.auth.uid && review(request.resource.data) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rating','body','status','updatedAt']) && request.resource.data.updatedAt==request.time;
+      allow delete: if signedIn() && resource.data.customerId==request.auth.uid;
+    }
+    match /{document=**}
+    {
+      allow read,write: if false;
+    }
+  }
+}

@@ -1,0 +1,6 @@
+import { useState } from 'react'
+import { ConfirmationDialog } from '../ui/ConfirmationDialog'
+import { fulfillmentStages } from '../../features/seller/logic'
+import { useSeller } from '../../features/seller/store'
+import type { SellerOrder, FulfillmentStatus } from '../../types/seller'
+export function OrderStatusSelector({order}:{order:SellerOrder}){const {updateOrder}=useSeller(),[pending,setPending]=useState<FulfillmentStatus|null>(null),[error,setError]=useState('');const index=fulfillmentStages.indexOf(order.status);return <><select className="order-status-select" aria-label={`Status for ${order.id}`} value={order.status} disabled={order.status==='Delivered'} onChange={e=>{setError('');setPending(e.target.value as FulfillmentStatus)}}>{fulfillmentStages.map((status,i)=><option value={status} key={status} disabled={i!==index&&i!==index+1}>{status}</option>)}</select>{error&&<p role="alert" className="field-error">{error}</p>}<ConfirmationDialog open={pending!==null} title="Update fulfillment status?" description={`Move ${order.id} from ${order.status} to ${pending??''}? This updates the local order timeline.`} confirmLabel="Update status" onClose={()=>setPending(null)} onConfirm={async()=>{if(pending)await updateOrder(order.id,pending)}}/></>}

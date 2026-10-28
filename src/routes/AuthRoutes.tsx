@@ -1,0 +1,7 @@
+import { Navigate, Outlet, useLocation } from 'react-router-dom'
+import { useAuth } from '../features/auth/useAuth'
+import { authDestination } from '../features/auth/redirects'
+function AuthLoading(){return <div className="auth-route-loading" role="status">Restoring your session…</div>}
+export function PublicRoute(){const {user,loading}=useAuth(),location=useLocation();if(loading)return <AuthLoading/>;const seller=location.pathname.startsWith('/seller/')||location.state?.from==='/seller/start';if(user)return <Navigate replace to={seller?(user.sellerVerified?authDestination(user,location.state?.from):'/seller/start'):authDestination(user,location.state?.from)} state={{from:seller?'/seller/start':location.state?.from}}/>;return <Outlet/>}
+export function ProtectedRoute({requireVerified=false}:{requireVerified?:boolean}){const {user,loading}=useAuth(),location=useLocation();if(loading)return <AuthLoading/>;const from=location.pathname+location.search+location.hash;if(!user)return <Navigate replace to="/login" state={{from}}/>;if(requireVerified&&!user.emailVerified)return <Navigate replace to="/auth/verify-email" state={{from}}/>;return <Outlet/>}
+export function SellerProtectedRoute(){const {user,loading}=useAuth(),location=useLocation();if(loading)return <AuthLoading/>;const from=location.pathname+location.search+location.hash;if(!user)return <Navigate replace to="/seller/login" state={{from}}/>;if(user.role!=='seller'||!user.sellerVerified)return <Navigate replace to="/access-denied" state={{from}}/>;return <Outlet/>}

@@ -1,0 +1,13 @@
+import { collection, doc, getDoc, getDocs, onSnapshot, query, where } from 'firebase/firestore'
+import { auth, db } from '../../lib/firebase/client'
+import { ProductServiceError } from '../productService'
+import { callServerless } from '../serverless'
+import type { ProductDocument } from './models'
+import type { Product } from '../../types/product'
+import type { SellerProduct } from '../../types/seller'
+export function mapFirestoreProduct(id:string,p:ProductDocument):Product{return {id:p.source==='fakestore'?`fakestore:${p.externalId}`:`firestore:${id}`,source:p.source==='fakestore'?{kind:'fakestore',externalId:p.externalId!}:{kind:'firestore',listingId:id,sellerId:p.ownerId},name:p.title,description:p.description,category:p.category,price:p.discountPrice??p.price,...(p.discountPrice!==null?{originalPrice:p.price}:{}),rating:p.rating,reviews:p.reviews,image:p.images[0]?.url||'/images/product-placeholder.svg',stock:p.stock}}
+export async function fetchPublishedProducts(category?:string){const constraints=[where('status','==','published')];if(category)constraints.push(where('category','==',category));const snapshot=await getDocs(query(collection(db,'products'),...constraints));return snapshot.docs.map(d=>mapFirestoreProduct(d.id,d.data() as ProductDocument))}
+export async function fetchFirestoreProduct(id:string){if(!/^[a-zA-Z0-9_-]+$/.test(id))throw new ProductServiceError('This product link is invalid.','not-found');try{const snapshot=await getDoc(doc(db,'products',id));if(!snapshot.exists())throw new ProductServiceError('Product not found.','not-found');return mapFirestoreProduct(snapshot.id,snapshot.data() as ProductDocument)}catch(error){if(error&&typeof error==='object'&&'code'in error&&error.code==='permission-denied')throw new ProductServiceError('This product is not available.','not-found');throw error}}
+export function observeSellerProducts(uid:string,next:(products:SellerProduct[])=>void,error:(error:Error)=>void){return onSnapshot(query(collection(db,'products'),where('ownerId','==',uid)),snapshot=>next(snapshot.docs.map(d=>{const p=d.data() as ProductDocument;return {...p,id:d.id,status:p.status==='published'?'Active':p.status==='archived'?'Archived':'Draft',createdAt:p.createdAt?.toDate().toISOString()||new Date().toISOString()}})),error)}
+export async function saveSellerProduct(data:Omit<SellerProduct,'id'|'createdAt'>,id?:string){if(!auth.currentUser)throw new Error('Sign in to manage listings.');return (await callServerless<{id:string}>('saveProduct',{product:data,...(id?{id}:{})})).id}
+export async function archiveSellerProduct(id:string){await callServerless('archiveProduct',{id})}

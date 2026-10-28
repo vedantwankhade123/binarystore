@@ -1,0 +1,1 @@
+{"indexes":[{"collectionGroup":"products","queryScope":"COLLECTION","fields":[{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"category","order":"ASCENDING"}]},{"collectionGroup":"reviews","queryScope":"COLLECTION","fields":[{"fieldPath":"productId","order":"ASCENDING"},{"fieldPath":"status","order":"ASCENDING"}]}],"fieldOverrides":[]}

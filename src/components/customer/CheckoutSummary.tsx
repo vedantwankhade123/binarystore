@@ -1,0 +1,5 @@
+import type { ReactNode } from 'react'
+import type { CartLine } from '../../types/customer'
+import { calculateTotals, money } from '../../utils/commerce'
+import { ProductImage } from '../products/ProductImage'
+export function CheckoutSummary({items,showItems=false,children}:{items:CartLine[];showItems?:boolean;children?:ReactNode}){const totals=calculateTotals(items);return <aside className="checkout-summary"><h2>Order summary <span>({totals.count})</span></h2>{showItems&&<div className="summary-items">{items.map(({product,quantity})=><div key={product.id}><ProductImage src={product.image} alt={product.name}/><span>{product.name}<small>Qty {quantity}</small></span><strong>{money(product.price*quantity)}</strong></div>)}</div>}<dl className="totals"><div><dt>Subtotal</dt><dd>{money(totals.subtotal)}</dd></div><div><dt>Shipping</dt><dd>{totals.shipping?money(totals.shipping):'Free'}</dd></div><div className="total"><dt>Estimated total</dt><dd>{money(totals.total)}</dd></div></dl><p className="summary-note">Free shipping from $75. Otherwise $5.95. Prices are in USD. Final prices and stock are checked when you place your order.</p>{children}</aside>}

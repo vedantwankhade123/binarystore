@@ -1,0 +1,28 @@
+import { useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { Search, SlidersHorizontal, X } from 'lucide-react'
+import { getAllProducts, getCategories } from '../services/catalogService'
+import { useResource } from '../hooks/useResource'
+import { useDebounce } from '../hooks/useDebounce'
+import { categoryLabel } from '../features/products/data'
+import { ProductCard } from '../components/products/ProductCard'
+import { ProductSkeletonGrid, RequestError } from '../components/ui/States'
+const sorts = [{value:'featured',name:'Featured'},{value:'price-asc',name:'Price: low to high'},{value:'price-desc',name:'Price: high to low'},{value:'rating',name:'Highest rated'},{value:'name-asc',name:'Name: A–Z'},{value:'name-desc',name:'Name: Z–A'}]
+export function ShopPage(){
+  const catalog=useResource(getAllProducts), categories=useResource(getCategories)
+  const [params,setParams]=useSearchParams()
+  const query=params.get('q') || '', category=params.get('category') || ''
+  const min=params.get('min') || '', max=params.get('max') || '', rating=params.get('rating') || '', sort=params.get('sort') || 'featured'
+  const debouncedQuery=useDebounce(query)
+  function change(key:string,value:string){setParams(previous=>{const next=new URLSearchParams(previous);if(value)next.set(key,value);else next.delete(key);return next},{replace:true})}
+  const allProducts=catalog.data || []
+  const results=useMemo(()=>{
+    const search=debouncedQuery.trim().toLocaleLowerCase()
+    const filtered=(catalog.data || []).filter(p=>(!search || `${p.name} ${p.description}`.toLocaleLowerCase().includes(search)) && (!category || p.category===category) && (!min || p.price>=Number(min)) && (!max || p.price<=Number(max)) && (!rating || p.rating>=Number(rating)))
+    return filtered.sort((a,b)=>sort==='price-asc'?a.price-b.price:sort==='price-desc'?b.price-a.price:sort==='rating'?b.rating-a.rating:sort==='name-asc'?a.name.localeCompare(b.name):sort==='name-desc'?b.name.localeCompare(a.name):0)
+  },[catalog.data,debouncedQuery,category,min,max,rating,sort])
+  const categoryOptions=[...new Set([...(categories.data || []),...allProducts.map(p=>p.category),...(category?[category]:[])])]
+  const hasFilters=!!(query||category||min||max||rating||sort!=='featured')
+  const priceInvalid=!!(min&&max&&Number(min)>Number(max))
+  return <main className="container shop-page"><div className="page-heading"><h1>Find your next favorite.</h1><p>Explore the collection. Make it yours.</p></div><div className="shop-layout"><aside className="shop-filters" aria-label="Product filters"><div className="filter-heading"><h2><SlidersHorizontal size={18}/> Filters</h2><button onClick={()=>setParams({})} disabled={!hasFilters}>Reset all</button></div><label className="field-label" htmlFor="shop-search">Search products</label><div className="shop-search"><Search size={18}/><input id="shop-search" type="search" placeholder="Title or description" value={query} onChange={e=>change('q',e.target.value)}/></div><label className="field-label" htmlFor="category-filter">Category</label><select id="category-filter" value={category} onChange={e=>change('category',e.target.value)}><option value="">All categories</option>{categoryOptions.map(c=><option key={c} value={c}>{categoryLabel(c)}</option>)}</select>{categories.loading&&<small role="status">Loading categories…</small>}{categories.error&&<div className="filter-warning">Category list unavailable. You can still browse products. <button onClick={categories.retry}>Retry categories</button></div>}<fieldset><legend>Price range</legend><div className="price-fields"><label>Min ($)<input type="number" min="0" step="0.01" placeholder="0" value={min} onChange={e=>change('min',e.target.value)} aria-invalid={priceInvalid}/></label><span>–</span><label>Max ($)<input type="number" min="0" step="0.01" placeholder="Any" value={max} onChange={e=>change('max',e.target.value)} aria-invalid={priceInvalid}/></label></div>{priceInvalid&&<p className="field-error">Maximum price must be at least the minimum.</p>}</fieldset><label className="field-label" htmlFor="rating-filter">Customer rating</label><select id="rating-filter" value={rating} onChange={e=>change('rating',e.target.value)}><option value="">All ratings</option><option value="4">4 stars & up</option><option value="3">3 stars & up</option><option value="2">2 stars & up</option><option value="1">1 star & up</option></select></aside><section className="shop-results" aria-label="Products" aria-busy={catalog.loading||query!==debouncedQuery}><div className="results-toolbar"><p role="status">{catalog.loading?'Loading products…':catalog.error?'Products unavailable':`${results.length} ${results.length===1?'product':'products'}`}{query!==debouncedQuery&&' · Updating…'}</p><label>Sort by<select aria-label="Sort products" value={sort} onChange={e=>change('sort',e.target.value)}>{sorts.map(s=><option key={s.value} value={s.value}>{s.name}</option>)}</select></label></div>{category&&<button className="active-filter" onClick={()=>change('category','')}>{categoryLabel(category)}<X size={14}/></button>}{catalog.loading?<ProductSkeletonGrid count={8}/>:catalog.error?<RequestError message={catalog.error.message} retry={catalog.retry}/>:results.length?<div className="product-grid">{results.map(p=><ProductCard key={p.id} product={p}/>)}</div>:<div className="empty-results"><Search size={32}/><h2>{allProducts.length?'No matching finds':'No products available'}</h2><p>{allProducts.length?'Try a different search or loosen your filters.':'Check back soon for new products.'}</p><button className="button" onClick={()=>setParams({})} disabled={!hasFilters}>Reset filters</button></div>}</section></div></main>
+}
